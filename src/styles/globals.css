@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS Custom Properties (Design Tokens) ───────────── */
+:root {
+  /* Brand colors */
+  --color-navy: #1a3c6e;
+  --color-navy-dark: #0f2347;
+  --color-orange: #e8622a;
+  --color-orange-light: #fde8dc;
+
+  /* Status colors */
+  --color-green: #2e7d5e;
+  --color-green-bg: #eaf5ef;
+  --color-red: #c0392b;
+  --color-red-bg: #fdeaea;
+  --color-yellow: #b7860b;
+  --color-yellow-bg: #fef9e7;
+  --color-purple: #6b3fa0;
+  --color-purple-bg: #f3eefb;
+  --color-teal: #1a6e6e;
+  --color-teal-bg: #e0f4f4;
+
+  /* Neutrals */
+  --color-cream: #faf7f2;
+  --color-sand: #ede8df;
+  --color-sand-dark: #d8d0c4;
+  --color-ink: #1c1c1e;
+  --color-muted: #6b6860;
+  --color-light: #a8a39a;
+  --color-white: #ffffff;
+
+  /* Layout */
+  --header-height: 56px;
+  --breadcrumb-height: 36px;
+  --sidebar-width: 260px;
+  --max-content-width: 1200px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 300ms ease;
+}
+
+/* ── Base Styles ─────────────────────────────────────── */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: var(--color-cream);
+    color: var(--color-ink);
+    font-family: var(--font-noto-sans), system-ui, sans-serif;
+    min-height: 100vh;
+  }
+
+  /* Focus styles - accessible */
+  :focus-visible {
+    outline: 2px solid var(--color-orange);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: var(--color-sand);
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-sand-dark);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted);
+  }
+
+  /* Selection */
+  ::selection {
+    background: rgba(232, 98, 42, 0.2);
+    color: var(--color-ink);
+  }
+}
+
+/* ── Component Utilities ─────────────────────────────── */
+@layer components {
+  /* Chat message prose */
+  .prose-chat {
+    @apply text-sm leading-relaxed;
+  }
+  .prose-chat strong {
+    @apply font-semibold text-navy;
+  }
+  .prose-chat ul {
+    @apply mt-2 space-y-1 pl-4;
+  }
+  .prose-chat ul li {
+    @apply relative pl-2 before:absolute before:left-0 before:content-['•'] before:text-brand-orange;
+  }
+
+  /* Skeleton shimmer */
+  .skeleton {
+    @apply animate-shimmer bg-shimmer bg-[length:200%_100%] rounded;
+  }
+
+  /* Status badge base */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .badge-eligible {
+    @apply badge bg-scheme-green-bg text-scheme-green;
+  }
+  .badge-ineligible {
+    @apply badge bg-scheme-red-bg text-scheme-red;
+  }
+  .badge-pending {
+    @apply badge bg-scheme-yellow-bg text-scheme-yellow;
+  }
+  .badge-mvp {
+    @apply badge bg-brand-orange-light text-brand-orange;
+  }
+
+  /* Card base */
+  .card {
+    @apply rounded-xl border border-sand bg-white shadow-card transition-shadow duration-200 hover:shadow-card-hover;
+  }
+}
+
+/* ── Utility Extras ──────────────────────────────────── */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
