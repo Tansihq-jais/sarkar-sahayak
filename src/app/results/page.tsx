@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { PageLayout } from "@/components/layout/PageLayout";
@@ -14,7 +14,7 @@ import { SCHEMES } from "@/data/schemes";
 import { copyShareLink, decodeShareData, verdictLabel } from "@/lib/shareResult";
 import type { EligibilityResult, Verdict } from "@/types";
 
-export default function ResultsPage() {
+function ResultsContent() {
   const { result, verdict, messages } = useChatStore();
   const { documents, activeDocumentIds } = useDocumentStore();
   const activeSchemeId = useChatStore((s) => s.activeSchemeId);
@@ -237,5 +237,13 @@ export default function ResultsPage() {
         </div>
       </div>
     </PageLayout>
+  );
+}
+
+export default function ResultsPage() {
+  return (
+    <Suspense fallback={<PageLayout><div className="flex flex-col items-center justify-center min-h-[60vh] text-center"><p className="text-muted">Loading results...</p></div></PageLayout>}>
+      <ResultsContent />
+    </Suspense>
   );
 }
