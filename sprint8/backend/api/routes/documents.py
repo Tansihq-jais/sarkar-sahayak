@@ -2,11 +2,14 @@
 FastAPI router for document processing endpoints.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel
 import logging
 
 from tasks.process_document import process_document
+from config import get_settings, Settings
+from services.embedder import embed_single
+from services.vectorstore import query_similar
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -63,3 +66,38 @@ async def get_task_status(task_id: str):
         "status": result.status,
         "result": result.result if result.ready() else None,
     }
+
+
+class QueryRequest(BaseModel):
+    query: str
+    document_ids: list[str]
+    top_k: int = 5
+
+class ChunkResponse(BaseModel):
+    chunk_index: int
+    text: str
+
+class QueryResponse(BaseModel):
+    chunks: list[ChunkResponse]
+
+@router.post("/query", response_model=QueryResponse)
+async def query_documents(request: QueryRequest, settings: Settings = Depends(get_settings)):
+    try:
+        query_embedding = embed_single(request.query, model_name=settings.embedding_model)
+        
+        matches = query_similar(
+            query_embedding=query_embedding,
+            document_ids=request.document_ids,
+            api_key=settings.pinecone_api_key,
+            index_name=settings.pinecone_index_name,
+            top_k=request.top_k,
+        )
+        
+        chunks = [
+            ChunkResponse(chunk_index=match.chunk_index, text=match.text)
+            for match in matches
+        ]
+        return QueryResponse(chunks=chunks)
+    except Exception as e:
+        logger.error(f"Failed to query documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
