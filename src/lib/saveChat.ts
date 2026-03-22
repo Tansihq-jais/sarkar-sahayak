@@ -67,15 +67,17 @@ export async function saveMessages({ sessionId, schemeId, schemeName, messages }
     // Update turn count
     const userMsgCount = messages.filter((m) => m.role === "user").length;
     if (userMsgCount > 0) {
-      await supabase.rpc("increment_turn_count", {
+      const { error: rpcErr } = await supabase.rpc("increment_turn_count", {
         session_id: dbSessionId,
         increment: userMsgCount,
-      }).catch(() => {
+      });
+      
+      if (rpcErr) {
         // RPC might not exist — update directly
-        supabase.from("chat_sessions")
+        await supabase.from("chat_sessions")
           .update({ updated_at: new Date().toISOString() })
           .eq("id", dbSessionId!);
-      });
+      }
     }
   } catch (err) {
     console.error("saveMessages error:", err);
