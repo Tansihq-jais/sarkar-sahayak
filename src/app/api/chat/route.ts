@@ -3,15 +3,16 @@ import { z } from "zod";
 import { cookies } from "next/headers";
 import { buildSystemPrompt } from "@/lib/promptBuilder";
 import { checkRateLimit } from "@/lib/rateLimiter";
-import { saveMessages, createChatSession } from "@/lib/saveChat";
+import { saveMessages } from "@/lib/saveChat";
 import type { DocumentChunk } from "@/types";
 
-const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
-const OLLAMA_URL = `${OLLAMA_BASE_URL}/api/chat`;
-const MODEL = process.env.OLLAMA_MODEL ?? "gemma2:2b";
+// Groq — free API, very fast, no credit card needed
+// Get key at: https://console.groq.com
+// Free models: llama-3.3-70b-versatile, llama-3.1-8b-instant, gemma2-9b-it
+const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const GROQ_API_KEY = process.env.GROQ_API_KEY ?? "";
+const MODEL = process.env.GROQ_MODEL ?? "llama-3.3-70b-versatile";
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:8000";
-const PINECONE_API_KEY = process.env.PINECONE_API_KEY ?? "";
-const PINECONE_INDEX = process.env.PINECONE_INDEX_NAME ?? "sarkar-sahayak";
 
 const MessageSchema = z.object({
   role: z.enum(["user", "assistant"]),
@@ -32,14 +33,8 @@ const ChatRequestSchema = z.object({
   useRag: z.boolean().optional().default(false),
 });
 
-// ── RAG: fetch relevant chunks from backend ───────────────
-async function fetchRagChunks(
-  query: string,
-  documentIds: string[],
-  topK: number = 5
-): Promise<DocumentChunk[]> {
-  if (!PINECONE_API_KEY || !documentIds.length) return [];
-
+async function fetchRagChunks(query: string, documentIds: string[], topK = 5): Promise<DocumentChunk[]> {
+  if (!documentIds.length) return [];
   try {
     const res = await fetch(`${BACKEND_URL}/documents/query`, {
       method: "POST",
@@ -47,19 +42,12 @@ async function fetchRagChunks(
       body: JSON.stringify({ query, document_ids: documentIds, top_k: topK }),
       signal: AbortSignal.timeout(5000),
     });
-
     if (!res.ok) return [];
-
     const data = await res.json();
-    return (data.chunks ?? []).map((c: { chunk_index: number; text: string; score: number }, i: number) => ({
-      index: c.chunk_index ?? i,
-      text: c.text,
-      charStart: 0,
-      charEnd: c.text.length,
+    return (data.chunks ?? []).map((c: { chunk_index: number; text: string }, i: number) => ({
+      index: c.chunk_index ?? i, text: c.text, charStart: 0, charEnd: c.text.length,
     }));
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 export async function POST(req: NextRequest) {
@@ -86,43 +74,37 @@ export async function POST(req: NextRequest) {
     }, { status: 429 });
   }
 
-  // ── RAG: try to get better chunks from Pinecone ──────────
+  if (!GROQ_API_KEY) {
+    return NextResponse.json(
+      { error: "Groq API key not configured. Add GROQ_API_KEY to .env.local", code: "NO_API_KEY" },
+      { status: 500 }
+    );
+  }
+
+  // RAG: get relevant chunks from Pinecone if available
   let finalChunks = documentChunks as DocumentChunk[];
   if (useRag && schemeId) {
     const lastUserMsg = [...messages].reverse().find(m => m.role === "user");
     if (lastUserMsg) {
       const ragChunks = await fetchRagChunks(lastUserMsg.content, [schemeId]);
-      if (ragChunks.length > 0) {
-        finalChunks = ragChunks;
-      }
+      if (ragChunks.length > 0) finalChunks = ragChunks;
     }
   }
 
-  const systemPrompt = buildSystemPrompt({
-    documentChunks: finalChunks,
-    schemeName,
-  });
+  const systemPrompt = buildSystemPrompt({ documentChunks: finalChunks, schemeName });
 
-  // ── Persist user message to Supabase (fire and forget) ───
-  const userMessage = messages[messages.length - 1];
-  if (userMessage?.role === "user") {
-    saveMessages({
-      sessionId,
-      schemeId: schemeId ?? null,
-      schemeName: schemeName ?? null,
-      messages: [{ role: "user", content: userMessage.content, sequenceNum: messages.length - 1 }],
-    }).catch(console.error);
-  }
-
-  // ── Call Ollama ───────────────────────────────────────────
   try {
-    const ollamaResponse = await fetch(OLLAMA_URL, {
+    const groqResponse = await fetch(GROQ_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${GROQ_API_KEY}`,
+      },
       body: JSON.stringify({
         model: MODEL,
         stream: true,
-        options: { temperature: 0.1, num_predict: 1500 },
+        max_tokens: 1500,
+        temperature: 0.1,
         messages: [
           { role: "system", content: systemPrompt },
           ...messages.map((m) => ({ role: m.role, content: m.content })),
@@ -130,25 +112,23 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    if (!ollamaResponse.ok) {
-      if (ollamaResponse.status === 404) {
-        return NextResponse.json(
-          { error: `Model "${MODEL}" not found. Run: ollama pull ${MODEL}`, code: "MODEL_NOT_FOUND" },
-          { status: 500 }
-        );
+    if (!groqResponse.ok) {
+      const errBody = await groqResponse.json().catch(() => ({}));
+      console.error("Groq error:", groqResponse.status, errBody);
+      if (groqResponse.status === 401) {
+        return NextResponse.json({ error: "Invalid Groq API key.", code: "INVALID_API_KEY" }, { status: 401 });
       }
-      return NextResponse.json(
-        { error: "Ollama error. Make sure Ollama is running: ollama serve", code: "AI_ERROR" },
-        { status: 502 }
-      );
+      if (groqResponse.status === 429) {
+        return NextResponse.json({ error: "Groq rate limit reached. Please wait.", code: "UPSTREAM_RATE_LIMITED" }, { status: 429 });
+      }
+      return NextResponse.json({ error: "Groq API error. Please try again.", code: "AI_ERROR" }, { status: 502 });
     }
 
-    let fullAssistantResponse = "";
-
+    // Stream Groq SSE response to client (OpenAI-compatible format)
     const readable = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        const reader = ollamaResponse.body!.getReader();
+        const reader = groqResponse.body!.getReader();
         const decoder = new TextDecoder();
         let buffer = "";
 
@@ -162,29 +142,15 @@ export async function POST(req: NextRequest) {
 
             for (const line of lines) {
               const trimmed = line.trim();
-              if (!trimmed) continue;
+              if (!trimmed || trimmed === "data: [DONE]") continue;
+              if (!trimmed.startsWith("data: ")) continue;
               try {
-                const json = JSON.parse(trimmed);
-                const text = json.message?.content;
+                const json = JSON.parse(trimmed.slice(6));
+                const text = json.choices?.[0]?.delta?.content;
                 if (text) {
-                  fullAssistantResponse += text;
                   controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text })}\n\n`));
                 }
-                if (json.done === true) {
-                  // Persist assistant response to Supabase
-                  if (fullAssistantResponse) {
-                    saveMessages({
-                      sessionId,
-                      schemeId: schemeId ?? null,
-                      schemeName: schemeName ?? null,
-                      messages: [{ role: "assistant", content: fullAssistantResponse, sequenceNum: messages.length }],
-                    }).catch(console.error);
-                  }
-                  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-                  controller.close();
-                  return;
-                }
-              } catch { /* ignore */ }
+              } catch { /* ignore malformed lines */ }
             }
           }
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -206,18 +172,11 @@ export async function POST(req: NextRequest) {
         "X-RateLimit-Reset": String(rateLimit.resetAt),
       },
     });
+
   } catch (err) {
-    console.error("Ollama fetch error:", err);
-    const isConnectionRefused = err instanceof Error &&
-      (err.message.includes("ECONNREFUSED") || err.message.includes("fetch failed"));
-    if (isConnectionRefused) {
-      return NextResponse.json(
-        { error: "Ollama is not running. Start it with: ollama serve", code: "OLLAMA_NOT_RUNNING" },
-        { status: 500 }
-      );
-    }
+    console.error("Groq fetch error:", err);
     return NextResponse.json(
-      { error: "Failed to reach Ollama. Is it running?", code: "AI_ERROR" },
+      { error: "Failed to reach Groq API. Check your internet connection.", code: "AI_ERROR" },
       { status: 500 }
     );
   }

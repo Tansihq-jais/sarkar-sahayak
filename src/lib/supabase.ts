@@ -9,7 +9,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // ── Browser client (use in client components) ─────────────
-export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient<any>(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -21,9 +21,9 @@ export function createServerClient() {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceKey) {
     // Fall back to anon key for read operations
-    return createClient<Database>(supabaseUrl, supabaseAnonKey);
+    return createClient<any>(supabaseUrl, supabaseAnonKey);
   }
-  return createClient<Database>(supabaseUrl, serviceKey, {
+  return createClient<any>(supabaseUrl, serviceKey, {
     auth: { persistSession: false },
   });
 }
